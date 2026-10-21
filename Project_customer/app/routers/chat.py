@@ -1,8 +1,9 @@
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 
-from app.schemas import ChatMessageRequest
+
+from Project_customer.app.schemas import ChatMessageRequest
 
 from Project_customer.app.dependencies import ChatServiceDep,UserDep
 
@@ -11,13 +12,13 @@ router = APIRouter(prefix="/api/v1", tags=["聊天路由，发送历史消息，
 
 
 
-@router.post("/chat/messages")
-async def process_chat_messages_endpoint(
+@router.post("/chat/messages",status_code=status.HTTP_204_NO_CONTENT)
+async def process_chat_message_endpoint(
         payload: ChatMessageRequest,
         service: ChatServiceDep,
         user_info: UserDep,
 
-) -> dict[str, Any]:
+):
     '''
      职责：处理聊天消息路由请求
     1. 必须要有用户信息【身份：令牌】
@@ -27,4 +28,22 @@ async def process_chat_messages_endpoint(
     :param user_info:
     :return:
     '''
-    conversation_info = await service.process_chat_messages(payload, user_info.user_id)
+    await service.process_chat_message(payload, user_info.user_id)
+
+
+@router.get("/chat/history")
+async def get_chat_history(
+        service: ChatServiceDep,
+        user_info: UserDep,
+) -> dict[str, Any]:
+    '''
+     职责：获取聊天历史记录
+    1. 必须要有用户信息【身份：令牌】
+    2. 角色（权限）"user" or  "admin" or "staff"
+    :param service:
+    :param user_info:
+    :return:
+    '''
+    chat_history = service.get_chat_history(user_info.user_id)
+
+    return {"chat_history": chat_history}

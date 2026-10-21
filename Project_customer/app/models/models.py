@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from Project_customer.common.utils import get_uid, get_utcnow
-
+from Project_customer.models.enums import ConversationMode, MessageRole, TurnStatus
 
 class Base(DeclarativeBase):
     pass
@@ -25,7 +25,7 @@ class Conversation(Base):
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: get_uid("conv"))
     user_id: Mapped[str] = mapped_column(String(40), index=True)
-    mode: Mapped[str] = mapped_column(String(20), default="AI", index=True)
+    mode: Mapped[str] = mapped_column(String(20), default=ConversationMode.AI, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow)
     last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow, onupdate=get_utcnow)
 
@@ -54,8 +54,20 @@ class ConversationTurn(Base):
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: get_uid("turn"))
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
-    status: Mapped[str] = mapped_column(String(30), default="COLLECTING", index=True)
+    status: Mapped[str] = mapped_column(String(30), default=TurnStatus.COLLECTING, index=True)
     snapshot_message_id: Mapped[int | None] = mapped_column(Integer)
     collect_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow)
+
+class RealtimeEvent(Base):
+    """等待实时推送 Worker 发布的实时消息事件。为了持久化"""
+
+    __tablename__ = "realtime_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    target: Mapped[str] = mapped_column(String(80), index=True)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow)  # 创建时间
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)  # 发布时间
+

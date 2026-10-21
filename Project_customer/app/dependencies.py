@@ -6,18 +6,21 @@ ChatService组件
 from typing import Annotated
 
 from fastapi import Depends, Header
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from Project_customer.app.schemas import CurrentUser
 from Project_customer.app.services.auth import require_authorized_user
 from Project_customer.app.services.chat import ChatService
+from Project_customer.infrastructure.db import get_async_session
 
+SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 
-def get_chat_service():
+def get_chat_service(session: SessionDep):
     """
     获取业务服务
     :return:
     """
-    return ChatService()
+    return ChatService(session)
 
 
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

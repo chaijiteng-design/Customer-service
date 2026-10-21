@@ -5,10 +5,9 @@
 '''
 import jwt
 from fastapi import HTTPException, status
-from sqlalchemy.sql.functions import current_user
 
-from app.schemas import CurrentUser
-from common.settings import get_settings
+from Project_customer.app.schemas import CurrentUser
+from Project_customer.common.settings import get_settings
 
 
 def require_authorized_user(authorization: str | None, *roles: str) -> CurrentUser:
