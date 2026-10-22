@@ -1,7 +1,8 @@
 from datetime import timedelta
-from typing import Any
+from idlelib import history
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from Project_customer.app.schemas import ChatMessageRequest
@@ -13,6 +14,7 @@ from Project_customer.app.models.models import Message, Conversation, Conversati
 from Project_customer.app.models.enums import MessageRole, ConversationMode
 from Project_customer.common.utils import get_utcnow, get_uid
 from Project_customer.app.models.enums import TurnStatus
+from app.services.admin import HandoffService
 
 router = APIRouter()
 
@@ -27,6 +29,7 @@ class ChatService:
         self._session = session
         self._settings = get_settings()
         self._realtime_service = RealtimeService(session)
+        self._handoff_service = HandoffService(session)
 
     async def get_chat_history(self, user_id: str) -> dict[str, Any]:
         '''
@@ -106,7 +109,7 @@ class ChatService:
         conversation.last_active_at = get_utcnow()
 
         # 6、会话模式分流
-        if conversation.mode == conversation.Mode.AI:
+        if conversation.mode == ConversationMode.AI:
             # 1️）创建Turn
             await self._get_or_create_turn(conversation) # 创建Turn(为了对齐方法名，实际为创建Turn，只创建Turn)
         else: # QUEUE HUMAN
@@ -124,7 +127,7 @@ class ChatService:
         :return:
         '''
         # 1、定义有效会话的SQL语句
-        stmt = select(Conversation).where(Conversation.user_id == user_id, Conversation.mode != ConversationMode.CLOSED)
+        stmt = select(Conversation).where(Conversation.user_id == user_id, Conversation.mode != ConversationMode.CLOSED).with_for_update()
         # 2、查询有效会话
         conversation = await self._session.execute(stmt)
 
@@ -175,7 +178,219 @@ class ChatService:
 
         return collecting_turn
 
+    async def claim_turn(self) -> tuple[ConversationTurn, dict[str, Any], str] | None:
+        """
+        职责：
+        1. 领取轮次
+        1.1 领取不到，直接返回None
+        1.2 领取到，构建AI Service需要的请求数据（payload）
+        2. 返回 领取到的轮次、payload、用户ID
+        :return:
+        """
 
+        # 1、领取轮次
+        # a） 定义领取轮次的sql语句
+        stmt = select(ConversationTurn).where(ConversationTurn.status == TurnStatus.COLLECTING,
+                                              ConversationTurn.collect_until <= get_utcnow()).with_for_update()
+        # b） 执行sql语句
+        claimed_turn = await self._session.execute(stmt)
+
+        # 2、如果没有领取到，直接返回None
+        if claimed_turn is None:
+            return None
+
+        # 3、查询当前轮次对应的会话
+        conversation = await self._session.scalar(
+            select(Conversation).where(Conversation.id == claimed_turn.conversation_id).with_for_update()
+        )
+        # 4、查询当前会话对应用户角色的最新消息ID
+        latest_message_id = await self._get_latest_user_message_id(conversation.id)
+
+        # 3、修改当前轮次的状态为RUNNING 以及当前轮次的快照消息ID
+        claimed_turn.status = TurnStatus.RUNNING
+        claimed_turn.snapshot_message_id = latest_message_id # 确定本轮消息的下落
+        claimed_turn.attempts += 1
+        # 4、构建payload
+            # 1). 当前会话ID
+            # 2). 当前消息
+            # 3). 本轮之外的消息【Q:用户消息/A【普通AI回复、人工回复】】历史消息留下30条
+        payload = await self._build_request_payload(claimed_turn, conversation)
+
+        # 5、提交（数据修改）
+        await self._session.commit()
+
+        # 6、返回结果
+        # return claimed_turn, payload, cast(str, conversation.user_id)
+        return claimed_turn, payload, str(conversation.user_id)
+
+
+
+    async def _get_latest_user_message_id(self, conversation_id) -> int:
+        '''
+        职责：找到当前轮次对应会话的最新用户角色的消息ID
+        :param id:
+        :return:
+        '''
+        stmt = select(func.max(Message.id)).where(Message.conversation_id == conversation_id,
+                                                  Message.role == MessageRole.USER)
+        return await self._session.scalar(stmt)
+
+    async def _build_request_payload(self, claimed_turn, conversation):
+        '''
+        职责：构建AI Service需要的请求数据（payload）
+        1. 当前消息---[Messages表中的主键ID [消息上限ID]   [消息下限ID] ]
+        2. 历史消息---[截取、反转]
+        :param claimed_turn: 领取到的轮次
+        :param conversation: 当前会话
+        :return: 构建的payload
+        '''
+
+        # 1、构建当前消息
+        # a) 定义当前消息的SQL语句
+        stmt = select(Message.id).where(Message.conversation_id == conversation.id,
+                                     Message.role == MessageRole.USER)
+        # b) 执行sql语句，获取消息上线ID
+        latest_reply_id = await self._session.scalar(stmt) or 0
+
+        # c) 定义查询当前轮次的消息的SQL语句
+        messages_stmt = select(Message).where(Message.conversation_id == conversation.id,
+                                              Message.id > latest_reply_id,
+                                              Message.id <= claimed_turn.snapshot_message_id
+        ).order_by(Message.id)
+
+        # d) 执行sql语句，获取当前轮次的消息
+        current_messages = (await self._session.scalars(messages_stmt)).all()
+
+        # 2、构建历史消息(决策：消息的条数： 30条 消息最近（最新）)
+        # a) 定义查询历史消息的SQL语句
+        '''
+        history_stmt = select(Message).where(Message.conversation_id == conversation.id,
+                                              Message.id < latest_reply_id,
+                                              Message.id > latest_reply_id - 30
+        ).order_by(Message.id)
+        '''
+        history_stmt = select(Message).where(
+            Message.conversation_id == conversation.id,
+            Message.id < current_messages[0].id).order_by(Message.id.desc()).limit(30)
+
+        # b) 执行sql语句获取历史消息
+        history_messages = reversed((await self._session.scalars(history_stmt)).all())
+
+        # 3、返回载荷（payload）数据
+        return {
+            "current_message": current_messages,
+            "messages":[
+                {
+                    "role": message.role,
+                    "type": message.type,
+                    "content": message.content
+                }
+                for message in current_messages
+            ],
+            "history": [
+                {
+                    "role": history.role,
+                    "type": history.type,
+                    "content": history.content
+                }
+                for history in history_messages
+            ]
+        }
+
+    async def finish_turn(self,
+                          claimed_turn: ConversationTurn,
+                          run_result: dict[str, Any] | None,
+                          error: Exception | None):
+        """
+        职责：结算
+        1. 修改轮次状态【COMPLETED FAILED SUPERSEDED】
+        COMPLETED：  1. run_result有结果，error没有结果  2. 处理轮次期间，"没有"新的消息进入到会话
+        SUPERSEDED： 1. run_result有结果，error没有结果  2. 处理轮次期间，"有"新的消息进入到会话
+        FAILED：    1. run_result没有结果，error有结果  2. 重试次数达到了最大值
+
+        2. 保存AI Service给的结果【类型1:普通AI 回复结果，类型2:转人工请求的回复结果】
+        2.1 普通AI 回复结果；------最终保存到2张表即可
+            保存到messages表【role:AI】 实时通知给用户【保存到realtime_events】表
+        2.2 转人工请求 回复结果；------最终保存到3张表即可
+            保存到messages表【role:AI】
+            实时通知给“用户端”【保存到realtime_events】表；实时通知给“客服端”【保存到realtime_events】 让前端在客服端刷新工单列表【通知信号而已】
+            创建工单信息（初始化工单记录：handoffs）
+
+        :param claimed_turn:
+        :param run_result:
+        :param error:
+        :return:
+        """
+        conversation = await self._session.scalar(
+            select(Conversation).where(Conversation.id == claimed_turn.conversation_id)
+        )
+
+        latest_user_message_id = await self._get_latest_user_message_id(str(conversation.id))
+
+        # 1、校验快照版本是否一致
+        if claimed_turn.snapshot_message_id != latest_user_message_id:
+            claimed_turn.status = TurnStatus.SUPERSEDED
+            await self._session.commit()
+            return
+
+        # 2、异常
+        if error is not None:
+            # a) 继续重试
+            if claimed_turn.attempts < self._settings.max_retries:
+                claimed_turn.status = TurnStatus.COLLECTING
+                claimed_turn.collect_until = get_utcnow() + timedelta(seconds=self._settings.retry_interval) # AI Service请求时间长一些
+            # b) 终止重试 或 不可以重试
+            else:
+                claimed_turn.status = TurnStatus.FAILED
+                # 存储失败消息到message表以及将失败的消息给用户
+                await self._save_ai_reply(conversation, {"kind": "error", "text": "AI 服务不可用，请稍后重试."})
+
+            await self._session.commit()
+            return
+        # 3、正常
+        claimed_turn.status = TurnStatus.COMPLETED
+
+        # 3.1 转人工的请求
+        if run_result['reply_type'] == "REQUEST_HANDOFF":
+            # a) 创建工单信息（初始化工单记录：handoffs）
+            self._handoff_service.create_handoff()
+            # b) 修改会话模式 队列模式
+            conversation.mode = ConversationMode.QUEUED
+
+        # 3.2 普通AI回复
+        await self._save_ai_reply(conversation, run_result)
+
+        # 4 提交（数据修改）
+        await self._session.commit()
+
+    async def _save_ai_reply(self,
+                             conversation: Conversation,
+                             content: dict[str, Any]):
+        '''
+        1. 存储AI 正常回复的消息 转人工的请求
+        2. 存储realtime_events表
+        :param conversation:
+        :param content:
+        :return:
+        '''
+        # 1、构建消息队列（对内）
+        message = Message(
+            message_id=get_uid("msg"),
+            conversation_id=conversation.id,
+            role=MessageRole.AI,
+            message_type='text',
+            content=content
+        )
+        conversation.last_active_at = get_utcnow()
+        self._session.add(message)
+
+        # 2、构建实时的时间（对外）
+        self._realtime_service.add_event(
+            message,
+            conversation,
+            notify_user=True,
+            notify_staff=conversation.mode == ConversationMode.QUEUED
+        )
 
 
 
