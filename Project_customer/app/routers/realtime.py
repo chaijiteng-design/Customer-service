@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter,WebSocket,status
-from typing_inspection.typing_objects import target
 
 from Project_customer.infrastructure.redis import redis_client
 from app.services.auth import decode_token
