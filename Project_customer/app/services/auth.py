@@ -19,7 +19,7 @@ def require_authorized_user(authorization: str | None, *roles: str) -> CurrentUs
     access_token = authorization.split(" ",1)[1]
 
     # 3、根据令牌解密
-    current_user = decode_access_token(access_token)
+    current_user = decode_token(access_token)
     if current_user.role not in roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
 
@@ -27,7 +27,7 @@ def require_authorized_user(authorization: str | None, *roles: str) -> CurrentUs
 
 
 
-def decode_access_token(access_token: str) -> CurrentUser:
+def decode_token(access_token: str) -> CurrentUser:
     """
     职责：解析令牌获取用户信息
     jwt:加密、解密【加密算法、秘钥】

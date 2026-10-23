@@ -9,7 +9,7 @@ from Project_customer.app.services.auth import encode_token
 from Project_customer.app.services.chat import ChatService
 from Project_customer.common.settings import get_settings
 from Project_customer.infrastructure.db import async_session_factory
-
+from Project_customer.common.event_loop import run_async
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -96,3 +96,8 @@ class AIWorker:
         except httpx.HTTPStatusError as exc:
             logger.error("会话 %s 调用 AI Service 失败: %s", payload["conversation_id"], exc)
             return None, exc
+
+ai_woker = AIWorker()
+
+if __name__ == '__main__':
+    run_async(ai_woker.start())

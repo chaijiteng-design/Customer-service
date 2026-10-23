@@ -260,6 +260,8 @@ class ChatService:
 
         # d) 执行sql语句，获取当前轮次的消息
         current_messages = (await self._session.scalars(messages_stmt)).all()
+        if not current_messages:
+            return {}
 
         # 2、构建历史消息(决策：消息的条数： 30条 消息最近（最新）)
         # a) 定义查询历史消息的SQL语句

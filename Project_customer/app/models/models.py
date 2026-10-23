@@ -6,7 +6,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from Project_customer.common.utils import get_uid, get_utcnow
-from Project_customer.models.enums import ConversationMode, MessageRole, TurnStatus
+from Project_customer.app.models.enums import ConversationMode, MessageRole, TurnStatus,HandoffStatus
+
 
 class Base(DeclarativeBase):
     pass
@@ -70,4 +71,23 @@ class RealtimeEvent(Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow)  # 创建时间
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)  # 发布时间
+
+
+class Handoff(Base):
+    """记录一次人工客服工单及其处理状态。"""
+
+    __tablename__ = "handoffs"
+    __table_args__ = (
+        Index("uq_open_handoff_per_conversation", "conversation_id", unique=True,
+              postgresql_where=text("status IN ('WAITING', 'ACTIVE')")),
+    )
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: get_uid("handoff"))
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    summary: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default=HandoffStatus.WAITING, index=True)
+    staff_id: Mapped[str | None] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utcnow)
+
 
