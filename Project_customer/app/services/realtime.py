@@ -1,8 +1,8 @@
-from select import select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from Project_customer.app.models.models import Message, Conversation, RealtimeEvent
-from common.utils import get_utcnow
+from Project_customer.common.utils import get_utcnow
 
 """"
 异步场景(压榨CPU)：
@@ -59,6 +59,6 @@ class RealtimeService:
 
         return await self._session.scalar(stmt)
 
-    async def get_mark_published(self, event: RealtimeEvent):
+    async def mark_published(self, event: RealtimeEvent):
         event.published_at = get_utcnow()
         await self._session.commit()

@@ -44,6 +44,6 @@ async def get_chat_history(
     :param user_info:
     :return:
     '''
-    chat_history = service.get_chat_history(user_info.user_id)
+    chat_history = await service.get_chat_history(user_info.user_id)
 
     return {"chat_history": chat_history}

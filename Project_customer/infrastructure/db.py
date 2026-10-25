@@ -8,7 +8,7 @@ from logging import getLogger
 logger = getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker, AsyncSession
-from common.settings import get_settings
+from Project_customer.common.settings import get_settings
 
 async_engine: AsyncEngine = create_async_engine(
     url=get_settings().database_url,
@@ -20,7 +20,7 @@ async_session_factory: async_sessionmaker = async_sessionmaker(
     expire_on_commit=False
 )
 
-async def get_async_session() -> AsyncGenerator[AsyncSession]:
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """
     职责：利用异步生成器对象返回异步session对象
     为什么用yield 不用return

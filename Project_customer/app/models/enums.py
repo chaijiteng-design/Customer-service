@@ -8,6 +8,7 @@ class ConversationMode(StrEnum):
     '''
     AI = "AI"  # 机器人模式
     QUEUED = "QUEUED"  # 队列模式
+    HUMAN = "HUMAN"  # 人类模式
     CLOSED = "CLOSED"  # 关闭模式
 
 

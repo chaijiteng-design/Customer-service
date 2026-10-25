@@ -14,10 +14,9 @@ from Project_customer.app.routers import hello,chat, admin, realtime
 
 # @asynccontextmanager(可选)
 async def lifespan(_: FastAPI):
-    # 1. 应用启动完毕回调到，处理路由请求之前（资源初始化动作）
-    # await ai_woker.start()
-    # await realtime_worker.start()
-
+    # asyncio.create_task(ai_woker.start())
+    # asyncio.create_task(realtime_worker.start())
+    # await asyncio.gather(ai_woker.start(),realtime_worker.start(),return_exceptions=True)
     yield
 
     # 2. 应用关闭之前执行（资源清理动作）

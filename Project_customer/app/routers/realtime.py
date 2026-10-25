@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter,WebSocket,status
 
 from Project_customer.infrastructure.redis import redis_client
-from app.services.auth import decode_token
+from Project_customer.app.services.auth import decode_token
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -46,7 +46,7 @@ async def realtime_endpoint(websocket: WebSocket):
     # 3、用redis的pub/sub完成订阅
     async with redis_client.pubsub() as pubsub:
         # a) 订阅路由后的通道
-        pubsub.subscribe(target)
+        await pubsub.subscribe(target)
 
         # b) 推送订阅通道成功的事件
         await websocket.send_json({"event_type":"connected"})
@@ -56,7 +56,7 @@ async def realtime_endpoint(websocket: WebSocket):
             async for item in pubsub.listen():
                 if item['type'] == 'message':
                     event_data = item['data']
-                    await websocket.send_json(event_data)  # 将通道的数据用ws发送给客户端
+                    await websocket.send_text(event_data)  # 将通道的数据用ws发送给客户端
 
         # d) 服务端不断的监听客户端是否关闭了连接  # WebsocketDisconnected Error
         async def disconnected():

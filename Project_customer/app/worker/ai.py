@@ -1,8 +1,8 @@
+import asyncio
 from typing import Any
 
 import httpx
 import logging
-from sqlalchemy.connectors import asyncio
 
 from Project_customer.app.schemas import CurrentUser
 from Project_customer.app.services.auth import encode_token
@@ -86,15 +86,17 @@ class AIWorker:
 
         # c) 发送请求
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                 response = await client.post(
                     f"{self._settings.ai_service_url}/internal/v1/agent/runs",
                     headers=headers,
                     json=payload
-                )
+                    )
                 response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            logger.error("会话 %s 调用 AI Service 失败: %s", payload["conversation_id"], exc)
+                # 3. 获取响应结果
+                return response.json(), None
+        except Exception as exc:
+            logger.exception("会话 %s 调用 AI Service 失败: %s", payload["conversation_id"], exc)
             return None, exc
 
 ai_woker = AIWorker()

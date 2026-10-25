@@ -9,9 +9,7 @@ from Project_customer.app.dependencies import HandoffServiceDep, StaffDep, Admin
 from Project_customer.app.schemas import ReplyRequest
 
 
-router = APIRouter(prefix="api/v1", tags=["人工客服以及管理员指标监控的路由"])
-
-router = APIRouter()
+router = APIRouter(prefix="/api/v1", tags=["人工客服以及管理员指标监控的路由"])
 
 @router.get("/handoffs")
 async def handoffs_endpoint(
@@ -32,9 +30,9 @@ async def get_handoff_messages_endpoint(
 async def accept_handoff_endpoint(
         handoff_id: str,
         service: HandoffServiceDep,
-        _: StaffDep  # 只检验
+        staff: StaffDep  # 只检验
 ):
-    return await service.accept_handoff(handoff_id)
+    return await service.accept_handoff(handoff_id,staff.user_id)
 
 @router.post("/handoffs/{handoff_id}/messages")
 async def reply_handoff_endpoint(

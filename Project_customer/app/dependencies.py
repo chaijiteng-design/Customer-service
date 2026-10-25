@@ -12,6 +12,7 @@ from Project_customer.app.schemas import CurrentUser
 from Project_customer.app.services.auth import require_authorized_user
 from Project_customer.app.services.chat import ChatService
 from Project_customer.infrastructure.db import get_async_session
+from Project_customer.app.services.admin import HandoffService
 
 SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 

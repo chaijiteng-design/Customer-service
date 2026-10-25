@@ -1,12 +1,10 @@
 from datetime import timedelta
-from idlelib import history
 from typing import Any, cast
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from Project_customer.app.schemas import ChatMessageRequest
-from fastapi import APIRouter
 
 from Project_customer.app.services.realtime import RealtimeService
 from Project_customer.common.settings import get_settings
@@ -14,10 +12,8 @@ from Project_customer.app.models.models import Message, Conversation, Conversati
 from Project_customer.app.models.enums import MessageRole, ConversationMode
 from Project_customer.common.utils import get_utcnow, get_uid
 from Project_customer.app.models.enums import TurnStatus
-from app.services.admin import HandoffService
-
-router = APIRouter()
-
+from Project_customer.app.services.admin import HandoffService
+from Project_customer.app.models.models import Message
 
 
 class ChatService:
@@ -85,7 +81,7 @@ class ChatService:
         # 1、重复消息教研
         stmt = select(Message).where(Message.message_id == payload.message_id)
 
-        message = await self._session.execute(stmt)
+        message = await self._session.scalar(stmt)
 
         if message:
 
@@ -129,7 +125,7 @@ class ChatService:
         # 1、定义有效会话的SQL语句
         stmt = select(Conversation).where(Conversation.user_id == user_id, Conversation.mode != ConversationMode.CLOSED).with_for_update()
         # 2、查询有效会话
-        conversation = await self._session.execute(stmt)
+        conversation = await self._session.scalar(stmt)
 
         # 3、判断会话是否存在
         if conversation:
@@ -163,15 +159,15 @@ class ChatService:
                                               ConversationTurn.status == TurnStatus.COLLECTING)
 
         # 2、查询处于能收集消息状态的轮次
-        collecting_turn = await self._session.execute(stmt)
+        collecting_turn = await (self._session.scalar(stmt))
 
         # 3、如果没有查询到待收集状态的轮次
         if collecting_turn is None:
             # 1) 创建待收集状态的轮次
             collecting_turn = ConversationTurn(conversation_id=conversation.id,
-                                                 status=TurnStatus.COLLECTING,
-                                                 collect_until=get_utcnow() + timedelta(
-                                                     minutes=self._settings.turn_collection_timeout_minutes)
+                                                status=TurnStatus.COLLECTING,
+                                                collect_until=get_utcnow() + timedelta(
+                                                    milliseconds=self._settings.message_merge_delay_ms)
                                                  )
             # 2) 保存轮次到数据库
             self._session.add(collecting_turn)
@@ -193,7 +189,7 @@ class ChatService:
         stmt = select(ConversationTurn).where(ConversationTurn.status == TurnStatus.COLLECTING,
                                               ConversationTurn.collect_until <= get_utcnow()).with_for_update()
         # b） 执行sql语句
-        claimed_turn = await self._session.execute(stmt)
+        claimed_turn = await self._session.scalar(stmt)
 
         # 2、如果没有领取到，直接返回None
         if claimed_turn is None:
@@ -247,8 +243,8 @@ class ChatService:
 
         # 1、构建当前消息
         # a) 定义当前消息的SQL语句
-        stmt = select(Message.id).where(Message.conversation_id == conversation.id,
-                                     Message.role == MessageRole.USER)
+        stmt = select(func.max(Message.id)).where(Message.conversation_id == conversation.id,
+                                     Message.role != MessageRole.USER)
         # b) 执行sql语句，获取消息上线ID
         latest_reply_id = await self._session.scalar(stmt) or 0
 
@@ -280,11 +276,11 @@ class ChatService:
 
         # 3、返回载荷（payload）数据
         return {
-            "current_message": current_messages,
+            "conversation_id": conversation.id,
             "messages":[
                 {
                     "role": message.role,
-                    "type": message.type,
+                    "type": message.message_type,
                     "content": message.content
                 }
                 for message in current_messages
@@ -292,7 +288,7 @@ class ChatService:
             "history": [
                 {
                     "role": history.role,
-                    "type": history.type,
+                    "type": history.message_type,
                     "content": history.content
                 }
                 for history in history_messages
@@ -324,7 +320,7 @@ class ChatService:
         :return:
         """
         conversation = await self._session.scalar(
-            select(Conversation).where(Conversation.id == claimed_turn.conversation_id)
+            select(Conversation).where(Conversation.id == claimed_turn.conversation_id).with_for_update()
         )
 
         latest_user_message_id = await self._get_latest_user_message_id(str(conversation.id))
@@ -338,9 +334,10 @@ class ChatService:
         # 2、异常
         if error is not None:
             # a) 继续重试
-            if claimed_turn.attempts < self._settings.max_retries:
+            if claimed_turn.attempts < self._settings.ai_worker_max_attempts:
                 claimed_turn.status = TurnStatus.COLLECTING
-                claimed_turn.collect_until = get_utcnow() + timedelta(seconds=self._settings.retry_interval) # AI Service请求时间长一些
+                claimed_turn.collect_until = get_utcnow() + timedelta(
+                    seconds=self._settings.ai_worker_retry_delay_seconds) # AI Service请求时间长一些
             # b) 终止重试 或 不可以重试
             else:
                 claimed_turn.status = TurnStatus.FAILED
@@ -355,7 +352,7 @@ class ChatService:
         # 3.1 转人工的请求
         if run_result['reply_type'] == "REQUEST_HANDOFF":
             # a) 创建工单信息（初始化工单记录：handoffs）
-            self._handoff_service.create_handoff()
+            self._handoff_service.creat_handoff(conversation, run_result["handoff_summary"])
             # b) 修改会话模式 队列模式
             conversation.mode = ConversationMode.QUEUED
 

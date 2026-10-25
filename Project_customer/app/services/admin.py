@@ -18,7 +18,7 @@ class HandoffService:
 
     def __init__(self, session: AsyncSession):
         self._session = session
-        self._realtime_service = RealtimeService
+        self._realtime_service = RealtimeService(session)
 
     def creat_handoff(self,
                       conversion: Conversation,
@@ -30,7 +30,7 @@ class HandoffService:
         :return:
         '''
 
-        handoff = Handoff(conversion_id=conversion.id,
+        handoff = Handoff(conversation_id=conversion.id,
                           user_id=conversion.user_id,
                           summary=summary,
                           status=HandoffStatus.WAITING
@@ -109,7 +109,7 @@ class HandoffService:
         handoff.status = HandoffStatus.RESOLVED
         conversion.mode = ConversationMode.AI
 
-        self._save_human_reply(conversion, f"人工客服服务接收，稍后由 AI 为你服务。")
+        self._save_human_reply(conversion, "人工客服服务接收，稍后由 AI 为你服务。")
 
         await self._session.commit()
 
@@ -121,8 +121,8 @@ class HandoffService:
         return {
             "conversations": await self._get_count(Conversation.id),
             "handoffs": await self._get_count(Handoff.id),
-            "queued": await self._get_count(Handoff.id, (Conversation.id, Conversation.mode == ConversationMode.QUEUED)),
-            "human": await self._get_count(Handoff.id, (Conversation.id, Conversation.mode == ConversationMode.HUMAN))
+            "queued": await self._get_count(Conversation.id, Conversation.mode == ConversationMode.QUEUED),
+            "human": await self._get_count(Conversation.id, Conversation.mode == ConversationMode.HUMAN)
         }
 
     async def _get_count(self, col, *condition_expr):
@@ -137,10 +137,10 @@ class HandoffService:
         '''
         # 1、查询工单信息
         stmt = select(Handoff).where(Handoff.id == handoff_id).with_for_update()
-        handoff = await self._session.scalars(stmt)
+        handoff = await self._session.scalar(stmt)
         # 2、查询会话信息
-        conversion = await self._session.scalars(
-            select(Conversation).where(Conversation.id == handoff.conversation_id))
+        conversion = await self._session.scalar(
+            select(Conversation).where(Conversation.id == handoff.conversation_id).with_for_update())
 
         return handoff, conversion
 
