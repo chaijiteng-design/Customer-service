@@ -8,7 +8,7 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 class Settings(BaseSettings):
     database_url: str = Field(
-        "postgresql+psycopg://customer_service:customer_service@192.168.200.199:5432/customer_service",
+        "postgresql+psycopg://customer_service:customer_service@192.168.200.128:5432/customer_service",
         description="pgsql数据库连接")
 
     jwt_secret: str = Field("ecommerce-secret", description="jwt加密的秘钥")

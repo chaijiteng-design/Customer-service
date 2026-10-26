@@ -58,8 +58,8 @@ class ChatService:
         await self._session.commit()
         # 4、返回结果
         return {
-            "current_conversation": current_conversation.id, # 当前会话id
-            "conversations": current_conversation.mode,  # 当前会话模式
+            "conversation_id": current_conversation.id,
+            "conversation_mode": current_conversation.mode,
             "messages": messages,
         }
 

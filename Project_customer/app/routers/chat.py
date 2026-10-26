@@ -46,4 +46,4 @@ async def get_chat_history(
     '''
     chat_history = await service.get_chat_history(user_info.user_id)
 
-    return {"chat_history": chat_history}
+    return chat_history
